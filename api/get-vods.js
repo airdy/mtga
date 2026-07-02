@@ -20,7 +20,6 @@ export default async function handler(req, res) {
 
     try {
         const searchName = username.toLowerCase();
-
         const dbKey = `intercepted_vods:${searchName}`;
         const interceptedVods = await redis.get(dbKey) || [];
 
@@ -51,9 +50,19 @@ export default async function handler(req, res) {
             if (videosData.data) {
                 for (const video of videosData.data) {
                     const thumb = video.thumbnail_url;
+                    let finalM3u8 = null;
+
                     if (thumb && thumb.includes('cf_vods/')) {
-                        const segment = thumb.split('cf_vods/')[1].split('/thumb/')[0];
-                        const finalM3u8 = `https://d3fi1amfgojobc.cloudfront.net/cf_vods/${segment}/chunked/index-dvr.m3u8`;
+                        const parts = thumb.split('cf_vods/')[1].split('/thumb/')[0].split('/');
+                        if (parts.length >= 2) {
+                            finalM3u8 = `https://${parts[0]}.cloudfront.net/${parts.slice(1).join('/')}/chunked/index-dvr.m3u8`;
+                        }
+                    } else if (thumb && thumb.includes('vod-secure.twitch.tv/')) {
+                        const streamId = thumb.split('vod-secure.twitch.tv/')[1].split('/thumb/')[0];
+                        finalM3u8 = `https://d2v02itv0y9u9t.cloudfront.net/${streamId}/chunked/index-dvr.m3u8`;
+                    }
+
+                    if (finalM3u8) {
                         twitchVods.push({
                             id: video.id,
                             title: video.title,

@@ -29,7 +29,7 @@ export default async function handler(req, res) {
             const tokenData = await tokenResponse.json();
             const accessToken = tokenData.access_token;
 
-            // Очікуємо 5 секунд, щоб Twitch встиг згенерувати перші файли маніфесту на CDN
+            // Очікуємо 5 секунд, щоб Twitch встиг згенерувати файли маніфесту на CDN
             await new Promise(resolve => setTimeout(resolve, 5000));
 
             const videosResponse = await fetch(`https://api.twitch.tv/helix/videos?user_id=${broadcasterId}&type=archive&first=1`, {
@@ -40,12 +40,19 @@ export default async function handler(req, res) {
             if (videosData.data && videosData.data.length > 0) {
                 const video = videosData.data[0];
                 const thumb = video.thumbnail_url;
+                let finalM3u8 = null;
 
                 if (thumb && thumb.includes('cf_vods/')) {
-                    const segment = thumb.split('cf_vods/')[1].split('/thumb/')[0];
-                    // Використовуємо прямий CDN-домен із відкритим CORS
-                    const finalM3u8 = `https://d3fi1amfgojobc.cloudfront.net/cf_vods/${segment}/chunked/index-dvr.m3u8`;
+                    const parts = thumb.split('cf_vods/')[1].split('/thumb/')[0].split('/');
+                    if (parts.length >= 2) {
+                        finalM3u8 = `https://${parts[0]}.cloudfront.net/${parts.slice(1).join('/')}/chunked/index-dvr.m3u8`;
+                    }
+                } else if (thumb && thumb.includes('vod-secure.twitch.tv/')) {
+                    const streamId = thumb.split('vod-secure.twitch.tv/')[1].split('/thumb/')[0];
+                    finalM3u8 = `https://d2v02itv0y9u9t.cloudfront.net/${streamId}/chunked/index-dvr.m3u8`;
+                }
 
+                if (finalM3u8) {
                     const dbKey = `intercepted_vods:${username}`;
                     const savedVods = await redis.get(dbKey) || [];
 

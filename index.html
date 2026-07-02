@@ -343,25 +343,32 @@
     }
 
     function handleDirectRecovery() {
-        let rawInput = document.getElementById('directUrlInput').value.trim();
-        if (!rawInput) return alert('Введіть посилання або системний хеш!');
+    let rawInput = document.getElementById('directUrlInput').value.trim();
+    if (!rawInput) return alert('Введіть посилання або системний хеш!');
 
-        let finalUrl = "";
+    let finalUrl = "";
 
-        if (rawInput.startsWith('http') && rawInput.includes('.m3u8')) {
+    // Якщо вставили повне посилання .m3u8
+    if (rawInput.startsWith('http') && rawInput.includes('.m3u8')) {
+        // Якщо це суворий домен vod-secure, підміняємо його на дзеркало без CORS
+        if (rawInput.includes('vod-secure.twitch.tv')) {
+            finalUrl = rawInput.replace('vod-secure.twitch.tv', 'd2v02itv0y9u9t.cloudfront.net');
+        } else {
             finalUrl = rawInput;
-        } 
-        else if (rawInput.includes('_') && !rawInput.startsWith('http')) {
-            finalUrl = `https://d3fi1amfgojobc.cloudfront.net/cf_vods/${rawInput}/chunked/index-dvr.m3u8`;
-        } 
-        else {
-            alert('Вставте або пряме посилання .m3u8, або повну назву папки з архівом.');
-            return;
         }
-
-        const safeTitle = btoa(unescape(encodeURIComponent("Пряме відновлення трансляції")));
-        launchVideo(finalUrl, safeTitle);
+    } 
+    // Якщо вставили просто хеш папки (напр. 3a8276f1..._1234567890)
+    else if (rawInput.includes('_')) {
+        finalUrl = `https://d2v02itv0y9u9t.cloudfront.net/${rawInput}/chunked/index-dvr.m3u8`;
+    } 
+    else {
+        alert('Вставте або пряме посилання .m3u8, або назву папки з архівом (наприклад: 4a5b6c..._1720000000).');
+        return;
     }
+
+    const safeTitle = btoa(unescape(encodeURIComponent("Пряме відновлення трансляції")));
+    launchVideo(finalUrl, safeTitle);
+	}
 
     function launchVideo(directM3u8Url, base64Title) {
         const decodedTitle = decodeURIComponent(escape(atob(base64Title)));
