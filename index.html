@@ -166,29 +166,40 @@
     }
 
     function launchVideo(m3u8Url, title) {
-        nowPlayingText.innerText = "⏳ Налаштування безпечного з'єднання з CDN...";
+    nowPlayingText.innerText = "⏳ Налаштування стабільного з'єднання...";
 
-        if (player.canPlayType('application/vnd.apple.mpegurl')) {
-            if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
-            player.src = m3u8Url;
+    if (hlsPlayer) { 
+        hlsPlayer.destroy(); 
+        hlsPlayer = null; 
+    }
+
+    if (player.canPlayType('application/vnd.apple.mpegurl')) {
+        player.src = m3u8Url;
+        player.load(); // Важливо для Safari/iOS: готує контейнер до нового стріму
+        
+        player.play()
+            .then(() => { 
+                nowPlayingText.innerText = "Зараз грає: " + title; 
+            })
+            .catch((err) => { 
+                console.log("Політика автовідтворення:", err);
+                nowPlayingText.innerHTML = "▶️ Потік завантажено. Натисніть кнопку <b>PLAY</b> на самому екрані відео."; 
+            });
+    } 
+    else if (Hls.isSupported()) {
+        hlsPlayer = new Hls();
+        hlsPlayer.loadSource(m3u8Url);
+        hlsPlayer.attachMedia(player);
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
             player.play()
                 .then(() => { nowPlayingText.innerText = "Зараз грає: " + title; })
-                .catch(() => { nowPlayingText.innerText = "Натисніть кнопку PLAY на екрані відео"; });
-        } 
-        else if (Hls.isSupported()) {
-            if (hlsPlayer) hlsPlayer.destroy();
-            hlsPlayer = new Hls();
-            hlsPlayer.loadSource(m3u8Url);
-            hlsPlayer.attachMedia(player);
-            hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
-                player.play();
-                nowPlayingText.innerText = "Зараз грає: " + title;
-            });
-            hlsPlayer.on(Hls.Events.ERROR, (ev, data) => {
-                if (data.fatal) nowPlayingText.innerText = "❌ Помилка: Не вдалося прочитати потік. Перевірте лінк.";
-            });
-        }
-    }
+                .catch(() => { nowPlayingText.innerHTML = "▶️ Натисніть кнопку <b>PLAY</b>."; });
+        });
+        hlsPlayer.on(Hls.Events.ERROR, (ev, data) => {
+            if (data.fatal) nowPlayingText.innerHTML = "<span style='color:#ff4a4a;'>❌ Помилка HLS: Не вдалося розшифрувати потік.</span>";
+			});
+		}
+	}
 </script>
 </body>
 </html>

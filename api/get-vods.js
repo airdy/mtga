@@ -1,29 +1,65 @@
 // api/get-vods.js
+
+// Функція для отримання офіційної сигнатури та токена доступу до VOD
+async function getTwitchVodTokenSig(vodId) {
+    const gqlQuery = [{
+        operationName: "PlaybackAccessToken",
+        extensions: {
+            persistedQuery: {
+                version: 1,
+                sha256Hash: "0828119ded1c13477966434e7d6377420a6230117a41c5a21fa9050bc19b8ed1"
+            }
+        },
+        variables: {
+            isLive: false,
+            login: "",
+            isVod: true,
+            vodID: vodId,
+            playerType: "embed"
+        }
+    }];
+
+    try {
+        const response = await fetch("https://gql.twitch.tv/gql", {
+            method: "POST",
+            headers: {
+                "Client-ID": "kimne78kx3ncx6brgo4mv6wki5h1ko", // Загальнодоступний веб-ключ Twitch
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(gqlQuery)
+        });
+        const json = await response.json();
+        const tokenData = json[0]?.data?.videoPlaybackAccessToken;
+        if (!tokenData) return null;
+        return {
+            token: tokenData.value,
+            sig: tokenData.signature
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET');
     res.setHeader('Content-Type', 'application/json');
 
     const { username, cursor } = req.query;
-    if (!username) {
-        return res.status(400).json({ error: 'Нікнейм стрімера обовʼязковий' });
-    }
+    if (!username) return res.status(400).json({ error: 'Нікнейм стрімера обовʼязковий' });
 
     const CLIENT_ID = process.env.TWITCH_CLIENT_ID;
     const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 
-    // Режим імітації (якщо немає ключів)
     if (!CLIENT_ID || !CLIENT_SECRET) {
-        await new Promise(resolve => setTimeout(resolve, 400));
-        const stableTestHls = "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8";
         return res.status(200).json({
             vods: [{
-                id: "mock_1",
-                title: `Тестовий стрім ${username} (Режим без ключів)`,
-                duration: "1h 20m",
+                id: "mock",
+                title: "Демо-потік (Перевірте налаштування оточення)",
+                duration: "1h 00m",
                 created_at: new Date().toISOString(),
                 thumbnail: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=320&h=180&fit=crop",
-                m3u8: `/api/proxy?url=${encodeURIComponent(stableTestHls)}`
+                m3u8: `/api/proxy?url=${encodeURIComponent("https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8")}`
             }],
             nextCursor: null
         });
@@ -51,29 +87,21 @@ export default async function handler(req, res) {
 
         const processedVods = [];
         for (const video of videosData.data) {
-            let m3u8Url = '';
-            const thumbUrl = video.thumbnail_url;
-
-            if (thumbUrl && thumbUrl.includes('cf_vods')) {
-                const match = thumbUrl.match(/cf_vods\/(.+?)\/thumb/);
-                if (match && match[1]) {
-                    m3u8Url = `https://vod-secure.twitch.tv/cf_vods/${match[1]}/chunked/index-dvr.m3u8`;
-                }
+            // Отримуємо офіційні підписи для кожного відео індивідуально
+            const tokenSig = await getTwitchVodTokenSig(video.id);
+            
+            if (tokenSig) {
+                const usherUrl = `https://usher.ttvnw.net/vod/${video.id}.m3u8?sig=${tokenSig.sig}&token=${encodeURIComponent(tokenSig.token)}&allow_source=true&player_type=embed`;
+                
+                processedVods.push({
+                    id: video.id,
+                    title: video.title,
+                    duration: video.duration,
+                    created_at: video.created_at,
+                    thumbnail: video.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180'),
+                    m3u8: `/api/proxy?url=${encodeURIComponent(usherUrl)}`
+                });
             }
-
-            if (!m3u8Url) continue;
-
-            // ОБОВ'ЯЗКОВО пропускаємо через наш CORS-проксі
-            const proxiedUrl = `/api/proxy?url=${encodeURIComponent(m3u8Url)}`;
-
-            processedVods.push({
-                id: video.id,
-                title: video.title,
-                duration: video.duration,
-                created_at: video.created_at,
-                thumbnail: video.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180'),
-                m3u8: proxiedUrl
-            });
         }
 
         return res.status(200).json({
