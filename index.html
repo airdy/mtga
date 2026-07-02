@@ -215,7 +215,7 @@
         launchVideo(finalUrl, safeTitle);
     }
 
-    function launchVideo(directM3u8Url, base64Title) {
+    function launchVideo(proxiedM3u8Url, base64Title) {
         const decodedTitle = decodeURIComponent(escape(atob(base64Title)));
         const playerSection = document.getElementById('playerSection');
         const video = document.getElementById('videoPlayer');
@@ -224,32 +224,36 @@
         playerSection.style.display = 'block';
         playerSection.scrollIntoView({ behavior: 'smooth' });
 
-        // Усі без винятку лінки загортаємо в наш потужний Edge проксі
-        const proxiedUrl = `/api/proxy?url=${encodeURIComponent(directM3u8Url)}`;
-
+        // Якщо HLS вже був запущений — знищуємо його перед новим стартом
         if (hlsInstance) {
             hlsInstance.destroy();
         }
 
+        // Hls.js тепер працює з потоком, який віддає наш proxy.js
         if (Hls.isSupported()) {
-            hlsInstance = new Hls({ maxMaxBufferLength: 30 });
-            hlsInstance.loadSource(proxiedUrl);
+            hlsInstance = new Hls({
+                // Додаємо конфігурацію для того, щоб HLS проксіював запити фрагментів
+                xhrSetup: function(xhr, url) {
+                    // Якщо шлях відносний, додаємо наш API префікс
+                    if (url.startsWith('/')) return;
+                }
+            });
+            
+            hlsInstance.loadSource(proxiedM3u8Url);
             hlsInstance.attachMedia(video);
             hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                video.play().catch(() => console.log("Чекаємо клік"));
+                video.play().catch(e => console.log("Автоплей заблоковано браузером"));
             });
 
             hlsInstance.on(Hls.Events.ERROR, function (event, data) {
                 if (data.fatal) {
-                    console.error("Помилка HLS:", data);
-                    if (data.details === 'manifestLoadError' || data.details === 'networkError') {
-                        alert("Не вдалося завантажити потік. Схоже, Twitch остаточно зачистив фізичні файли.");
-                    }
+                    console.error("Критична помилка HLS:", data);
+                    alert("Помилка відтворення. Можливо, потік потребує авторизації або файл видалено.");
                 }
             });
         } 
         else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = proxiedUrl;
+            video.src = proxiedM3u8Url;
             video.addEventListener('loadedmetadata', function() {
                 video.play();
             });
