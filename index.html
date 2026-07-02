@@ -44,7 +44,6 @@
             margin-bottom: 10px;
         }
 
-        /* Панелі керування */
         .panel {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
@@ -99,7 +98,6 @@
             background: var(--accent-hover);
         }
 
-        /* Секція плеєра */
         .player-section {
             display: none;
             margin-bottom: 30px;
@@ -122,7 +120,6 @@
             display: block;
         }
 
-        /* Сітка результатів пошуку */
         .vods-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -230,7 +227,6 @@
 <script>
     let hlsInstance = null;
 
-    // 1. Пошук відео через API
     async function searchVods() {
         const username = document.getElementById('usernameInput').value.trim();
         const grid = document.getElementById('vodsGrid');
@@ -262,9 +258,9 @@
                 const card = document.createElement('div');
                 card.className = 'vod-card';
                 
-                // Безпечно екрануємо назву для передачі у функцію кліку
-                const safeTitle = vod.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                card.setAttribute('onclick', `launchVideo('${vod.m3u8}', '${safeTitle}')`);
+                // Безпечне кодування тексту, щоб уникнути збоїв через лапки
+                const safeTitle = btoa(unescape(encodeURIComponent(vod.title)));
+                card.setAttribute('onclick', `launchVideoFromGrid('${vod.m3u8}', '${safeTitle}')`);
 
                 const date = new Date(vod.created_at).toLocaleDateString('uk-UA', {
                     day: 'numeric', month: 'long', year: 'numeric'
@@ -288,18 +284,15 @@
         }
     }
 
-    // 2. Пряме відновлення з верхнього інпуту
     function handleDirectRecovery() {
         let rawInput = document.getElementById('directUrlInput').value.trim();
         if (!rawInput) return alert('Введіть посилання або системний хеш!');
 
         let finalUrl = "";
 
-        // Якщо вставили повний лінк
         if (rawInput.startsWith('http') && rawInput.includes('.m3u8')) {
             finalUrl = `/api/proxy?url=${encodeURIComponent(rawInput)}`;
         } 
-        // Якщо вставили лише внутрішній хеш папки потоку (наприклад: 5c6c79e9be170a577ad2_lizok_ssk_317853129958_1782936187)
         else if (rawInput.includes('_') && !rawInput.startsWith('http')) {
             const guessedCdn = `https://d3fi1amfgojobc.cloudfront.net/${rawInput}/chunked/index-dvr.m3u8`;
             finalUrl = `/api/proxy?url=${encodeURIComponent(guessedCdn)}`;
@@ -312,30 +305,30 @@
         launchVideo(finalUrl, "Пряме відновлення трансляції");
     }
 
-    // 3. Ініціалізація плеєра та запуск потоку
+    // Допоміжна функція для розкодування назви з сітки результатів
+    function launchVideoFromGrid(proxyUrl, base64Title) {
+        const decodedTitle = decodeURIComponent(escape(atob(base64Title)));
+        launchVideo(proxyUrl, decodedTitle);
+    }
+
     function launchVideo(proxyUrl, title) {
         const playerSection = document.getElementById('playerSection');
         const video = document.getElementById('videoPlayer');
         document.getElementById('currentPlayerTitle').innerText = title;
 
-        // Показуємо плеєр та плавно скролимо до нього
         playerSection.style.display = 'block';
         playerSection.scrollIntoView({ behavior: 'smooth' });
 
-        // Руйнуємо старий потік, якщо він відтворювався
         if (hlsInstance) {
             hlsInstance.destroy();
         }
 
-        // Перевіряємо підтримку HLS.js (для Chrome/Opera/Firefox)
         if (Hls.isSupported()) {
-            hlsInstance = new Hls({
-                maxMaxBufferLength: 30 // Оптимальний буфер для стабільності
-            });
+            hlsInstance = new Hls({ maxMaxBufferLength: 30 });
             hlsInstance.loadSource(proxyUrl);
             hlsInstance.attachMedia(video);
             hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                video.play().catch(err => console.log("Автоплей заблоковано браузером, чекаємо на клік"));
+                video.play().catch(err => console.log("Автоплей очікує на клік користувача"));
             });
 
             hlsInstance.on(Hls.Events.ERROR, function (event, data) {
@@ -347,7 +340,6 @@
                 }
             });
         } 
-        // Для браузерів із рідною підтримкою HLS (наприклад, Safari на macOS/iOS)
         else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = proxyUrl;
             video.addEventListener('loadedmetadata', function() {

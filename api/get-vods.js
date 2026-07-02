@@ -26,10 +26,12 @@ export default async function handler(req, res) {
     }
 
     try {
+        // Отримання токену доступу Twitch API
         const tokenResponse = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}&grant_type=client_credentials`, { method: 'POST' });
         const tokenData = await tokenResponse.json();
         const accessToken = tokenData.access_token;
 
+        // Отримання ID користувача за нікнеймом
         const userResponse = await fetch(`https://api.twitch.tv/helix/users?login=${username}`, {
             headers: { 'Client-ID': CLIENT_ID, 'Authorization': `Bearer ${accessToken}` }
         });
@@ -37,6 +39,7 @@ export default async function handler(req, res) {
         if (!userData.data || userData.data.length === 0) return res.status(404).json({ error: 'Стрімера не знайдено.' });
         const userId = userData.data[0].id;
 
+        // Запит списку відео
         let twitchApiUrl = `https://api.twitch.tv/helix/videos?user_id=${userId}&type=all&first=10`;
         if (cursor) twitchApiUrl += `&after=${cursor}`;
 
@@ -52,10 +55,11 @@ export default async function handler(req, res) {
                 const thumb = video.thumbnail_url;
                 let finalM3u8 = "";
 
-                // Ідеальній карвінг посилання: забираємо рідний CDN-домен прямо з картинки
-                if (thumb && thumb.includes('/thumb/')) {
-                    const baseUrl = thumb.split('/thumb/')[0];
-                    const rawUsherUrl = `${baseUrl}/chunked/index-dvr.m3u8`;
+                // Витягуємо унікальний системний хеш з URL картинки
+                if (thumb && thumb.includes('cf_vods/')) {
+                    const segment = thumb.split('cf_vods/')[1].split('/thumb/')[0];
+                    // Склеюємо з ПРАВИЛЬНИМ відео-сервером Twitch
+                    const rawUsherUrl = `https://vod-secure.twitch.tv/cf_vods/${segment}/chunked/index-dvr.m3u8`;
                     finalM3u8 = `/api/proxy?url=${encodeURIComponent(rawUsherUrl)}`;
                 } else {
                     continue; 
