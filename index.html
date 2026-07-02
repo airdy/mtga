@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twitch VOD Stream Player</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #0e0e10;
+            color: #efeff1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            width: 100%;
+            max-width: 1000px;
+        }
+        .search-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+        input {
+            flex: 1;
+            padding: 14px;
+            border-radius: 6px;
+            border: 2px solid #26262c;
+            background-color: #1f1f23;
+            color: #fff;
+            font-size: 1rem;
+        }
+        input:focus {
+            outline: none;
+            border-color: #9146ff;
+        }
+        button {
+            padding: 14px 28px;
+            border-radius: 6px;
+            border: none;
+            background-color: #9146ff;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #772ce8; }
+        
+        .player-box {
+            width: 100%;
+            margin-bottom: 30px;
+            background: #18181b;
+            border-radius: 8px;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+        video {
+            width: 100%;
+            aspect-ratio: 16/9;
+            border-radius: 6px;
+            background-color: #000;
+        }
+        .video-title {
+            margin-top: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #adadb8;
+        }
+
+        .vod-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .vod-card {
+            background: #1f1f23;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .vod-card:hover {
+            border-color: #9146ff;
+            transform: translateY(-3px);
+        }
+        .vod-preview {
+            width: 100%;
+            aspect-ratio: 16/9;
+            object-fit: cover;
+            display: block;
+            background-color: #26262c;
+        }
+        .vod-details {
+            padding: 12px;
+        }
+        .vod-name {
+            font-weight: bold;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            color: #fff;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .vod-meta {
+            font-size: 0.8rem;
+            color: #adadb8;
+        }
+        .status-msg { text-align: center; color: #9146ff; font-weight: bold; margin: 20px; display: none; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+
+<div class="container">
+    <h2>Пошук прихованих VOD стрімів</h2>
+    
+    <div class="search-container">
+        <input type="text" id="streamerName" placeholder="Введіть точний нікнейм стрімера...">
+        <button onclick="fetchStreamerVods()">Знайти трансляції</button>
+    </div>
+
+    <div class="player-box">
+        <video id="mainPlayer" controls playsinline webkit-playsinline></video>
+        <div class="video-title" id="nowPlaying">Плеєр очікує вибору відео</div>
+    </div>
+
+    <div class="status-msg" id="statusMessage">Завантаження записів...</div>
+    <div class="vod-grid" id="vodGrid"></div>
+</div>
+
+<script>
+    const player = document.getElementById('mainPlayer');
+    const nowPlayingText = document.getElementById('nowPlaying');
+    const grid = document.getElementById('vodGrid');
+    const statusMsg = document.getElementById('statusMessage');
+    let hlsPlayer = null;
+
+    async function fetchStreamerVods() {
+        const username = document.getElementById('streamerName').value.trim();
+        if (!username) return alert('Нікнейм не може бути порожнім!');
+
+        statusMsg.style.display = 'block';
+        statusMsg.innerText = 'Звернення до Twitch API...';
+        grid.innerHTML = '';
+
+        try {
+            // Запит до нашої локальної/хмарної Serverless функції
+            const res = await fetch(`/api/get-vods?username=${username}`);
+            const data = await res.json();
+
+            statusMsg.style.display = 'none';
+
+            if (data.error) {
+                alert('Помилка: ' + data.error);
+                return;
+            }
+
+            if (!data.vods || data.vods.length === 0) {
+                grid.innerHTML = '<p style="grid-column: 1/-1; text-align:center;">Публічних або збережених в архівах VODів не знайдено.</p>';
+                return;
+            }
+
+            displayVods(data.vods);
+        } catch (err) {
+            statusMsg.style.display = 'none';
+            alert('Помилка звʼязку із сервером: ' + err.message);
+        }
+    }
+
+    function displayVods(vods) {
+        vods.forEach(vod => {
+            const card = document.createElement('div');
+            card.className = 'vod-card';
+            
+            const dateStr = new Date(vod.created_at).toLocaleDateString('uk-UA', {
+                day: 'numeric', month: 'long', year: 'numeric'
+            });
+
+            card.innerHTML = `
+                <img class="vod-preview" src="${vod.thumbnail}" alt="Прев'ю стріму">
+                <div class="vod-details">
+                    <div class="vod-name">${vod.title || 'Трансляція без назви'}</div>
+                    <div class="vod-meta">🕒 Тривалість: ${vod.duration} | 📅 ${dateStr}</div>
+                </div>
+            `;
+
+            card.onclick = () => launchVideo(vod.m3u8, vod.title);
+            grid.appendChild(card);
+        });
+    }
+
+    function launchVideo(m3u8Url, title) {
+        if (!m3u8Url) {
+            alert('Не вдалося згенерувати шлях до файлу трансляції.');
+            return;
+        }
+
+        nowPlayingText.innerText = "Зараз відтворюється: " + title;
+
+        // Перевірка на нативну підтримку HLS (iPhone Safari / Mac Safari)
+        if (player.canPlayType('application/vnd.apple.mpegurl')) {
+            player.src = m3u8Url;
+            player.play().catch(() => {
+                console.log("Автозапуск заблоковано політикою безпеки, натисніть кнопку Play.");
+            });
+        } 
+        // Альтернативний запуск через бібліотеку hls.js (для Chrome/ПК браузерів)
+        else if (Hls.isSupported()) {
+            if (hlsPlayer) {
+                hlsPlayer.destroy();
+            }
+            hlsPlayer = new Hls();
+            hlsPlayer.loadSource(m3u8Url);
+            hlsPlayer.attachMedia(player);
+            player.play();
+        } else {
+            alert('Ваш девайс не підтримує програвання HLS (.m3u8) потоків.');
+        }
+    }
+</script>
+</body>
+</html>
