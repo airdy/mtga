@@ -120,19 +120,19 @@
 <body>
 
 <div class="container">
-    <h2>Пошук прихованих VOD стрімів</h2>
+    <h2>Search for VOD streams</h2>
     
     <div class="search-container">
-        <input type="text" id="streamerName" placeholder="Введіть точний нікнейм стрімера...">
-        <button onclick="fetchStreamerVods()">Знайти трансляції</button>
+        <input type="text" id="streamerName" placeholder="Enter the exact streamer nickname...">
+        <button onclick="fetchStreamerVods()">Find VOD</button>
     </div>
 
     <div class="player-box">
         <video id="mainPlayer" controls playsinline webkit-playsinline></video>
-        <div class="video-title" id="nowPlaying">Плеєр очікує вибору відео</div>
+        <div class="video-title" id="nowPlaying">The player is waiting for a video selection.</div>
     </div>
 
-    <div class="status-msg" id="statusMessage">Завантаження записів...</div>
+    <div class="status-msg" id="statusMessage">Uploading VODs...</div>
     <div class="vod-grid" id="vodGrid"></div>
 </div>
 
@@ -145,10 +145,10 @@
 
     async function fetchStreamerVods() {
         const username = document.getElementById('streamerName').value.trim();
-        if (!username) return alert('Нікнейм не може бути порожнім!');
+        if (!username) return alert('Nickname cannot be empty!');
 
         statusMsg.style.display = 'block';
-        statusMsg.innerText = 'Звернення до Twitch API...';
+        statusMsg.innerText = 'Accessing the Twitch API...';
         grid.innerHTML = '';
 
         try {
@@ -159,19 +159,19 @@
             statusMsg.style.display = 'none';
 
             if (data.error) {
-                alert('Помилка: ' + data.error);
+                alert('Error: ' + data.error);
                 return;
             }
 
             if (!data.vods || data.vods.length === 0) {
-                grid.innerHTML = '<p style="grid-column: 1/-1; text-align:center;">Публічних або збережених в архівах VODів не знайдено.</p>';
+                grid.innerHTML = '<p style="grid-column: 1/-1; text-align:center;">No public or archived VODs found.</p>';
                 return;
             }
 
             displayVods(data.vods);
         } catch (err) {
             statusMsg.style.display = 'none';
-            alert('Помилка звʼязку із сервером: ' + err.message);
+            alert('Server error: ' + err.message);
         }
     }
 
@@ -180,15 +180,15 @@
             const card = document.createElement('div');
             card.className = 'vod-card';
             
-            const dateStr = new Date(vod.created_at).toLocaleDateString('uk-UA', {
+            const dateStr = new Date(vod.created_at).toLocaleDateString('en-US', {
                 day: 'numeric', month: 'long', year: 'numeric'
             });
 
             card.innerHTML = `
-                <img class="vod-preview" src="${vod.thumbnail}" alt="Прев'ю стріму">
+                <img class="vod-preview" src="${vod.thumbnail}" alt="Stream preview">
                 <div class="vod-details">
-                    <div class="vod-name">${vod.title || 'Трансляція без назви'}</div>
-                    <div class="vod-meta">🕒 Тривалість: ${vod.duration} | 📅 ${dateStr}</div>
+                    <div class="vod-name">${vod.title || 'Untitled broadcast'}</div>
+                    <div class="vod-meta">🕒 Duration: ${vod.duration} | 📅 ${dateStr}</div>
                 </div>
             `;
 
@@ -199,17 +199,17 @@
 
     function launchVideo(m3u8Url, title) {
         if (!m3u8Url) {
-            alert('Не вдалося згенерувати шлях до файлу трансляції.');
+            alert('Failed to generate broadcast file path.');
             return;
         }
 
-        nowPlayingText.innerText = "Зараз відтворюється: " + title;
+        nowPlayingText.innerText = "Now playing: " + title;
 
         // Перевірка на нативну підтримку HLS (iPhone Safari / Mac Safari)
         if (player.canPlayType('application/vnd.apple.mpegurl')) {
             player.src = m3u8Url;
             player.play().catch(() => {
-                console.log("Автозапуск заблоковано політикою безпеки, натисніть кнопку Play.");
+                console.log("Autoplay is blocked by security policy, click the Play button.");
             });
         } 
         // Альтернативний запуск через бібліотеку hls.js (для Chrome/ПК браузерів)
@@ -222,7 +222,7 @@
             hlsPlayer.attachMedia(player);
             player.play();
         } else {
-            alert('Ваш девайс не підтримує програвання HLS (.m3u8) потоків.');
+            alert('Your device does not support playing HLS (.m3u8) streams.');
         }
     }
 </script>
