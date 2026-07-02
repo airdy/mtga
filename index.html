@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Twitch VOD Stream Player</title>
+    <title>Twitch Player Pro</title>
     <style>
         body {
             margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -42,7 +42,7 @@
         .status-msg { text-align: center; color: #9146ff; font-weight: bold; margin: 20px; display: none; }
         
         .load-more-container { display: flex; justify-content: center; margin-top: 30px; margin-bottom: 50px; }
-        .load-more-btn { background-color: #26262c; color: #efeff1; border: 2px solid #3a3a44; display: none; }
+        .load-more-btn { background-color: #26262c; color: #efeff1; border: 2px solid #3a3a44; display: none; padding: 14px 40px; }
         .load-more-btn:hover { background-color: #3a3a44; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -50,10 +50,10 @@
 <body>
 
 <div class="container">
-    <h2>Пошук прихованих VOD стрімів</h2>
+    <h2>Пошук та відтворення VOD стрімів</h2>
     
     <div class="search-container">
-        <input type="text" id="streamerName" placeholder="Введіть точний нікнейм стрімера...">
+        <input type="text" id="streamerName" placeholder="Введіть нікнейм стрімера...">
         <button onclick="startNewSearch()">Знайти трансляції</button>
     </div>
 
@@ -83,10 +83,10 @@
 
     function startNewSearch() {
         const username = document.getElementById('streamerName').value.trim();
-        if (!username) return alert('Нікнейм не може бути порожнім!');
+        if (!username) return alert('Введіть нікнейм!');
         
         currentUsername = username;
-        nextCursor = null; // Скидаємо сторінку для нового пошуку
+        nextCursor = null; 
         grid.innerHTML = '';
         loadMoreBtn.style.display = 'none';
         
@@ -95,39 +95,34 @@
 
     async function fetchStreamerVods() {
         statusMsg.style.display = 'block';
-        statusMsg.innerText = nextCursor ? 'Завантаження наступної сторінки...' : 'Звернення до серверів...';
+        statusMsg.innerText = nextCursor ? 'Завантаження наступної сторінки...' : 'Пошук доступних відео...';
         loadMoreBtn.style.display = 'none';
 
         try {
             let url = `/api/get-vods?username=${encodeURIComponent(currentUsername)}`;
-            if (nextCursor) {
-                url += `&cursor=${encodeURIComponent(nextCursor)}`;
-            }
+            if (nextCursor) url += `&cursor=${encodeURIComponent(nextCursor)}`;
 
             const res = await fetch(url);
             const data = await res.json();
             statusMsg.style.display = 'none';
 
             if (data.error) {
-                alert('Помилка: ' + data.error);
+                alert('Помилка від Twitch: ' + data.error);
                 return;
             }
 
             if (!data.vods || data.vods.length === 0) {
                 if (!nextCursor) {
-                    grid.innerHTML = '<p style="grid-column: 1/-1; text-align:center;">Трансляцій не знайдено.</p>';
+                    grid.innerHTML = '<p style="grid-column: 1/-1; text-align:center;">Доступних відео в API не знайдено.</p>';
                 } else {
-                    alert('Ви завантажили всі доступні відео.');
+                    alert('Всі доступні відео завантажено.');
                 }
                 return;
             }
 
             displayVods(data.vods);
             
-            // Зберігаємо маркер наступної сторінки
             nextCursor = data.nextCursor || null;
-            
-            // Якщо є куди гортати далі — показуємо кнопку
             if (nextCursor) {
                 loadMoreBtn.style.display = 'block';
             } else {
@@ -136,7 +131,7 @@
 
         } catch (err) {
             statusMsg.style.display = 'none';
-            alert('Помилка звʼязку: ' + err.message);
+            alert('Помилка зʼєднання: ' + err.message);
         }
     }
 
@@ -150,32 +145,38 @@
             });
 
             card.innerHTML = `
-                <img class="vod-preview" src="${vod.thumbnail}" alt="Прев'ю стріму">
+                <img class="vod-preview" src="${vod.thumbnail}" alt="Прев'ю">
                 <div class="vod-details">
-                    <div class="vod-name">${vod.title || 'Трансляція без назви'}</div>
+                    <div class="vod-name">${vod.title || 'Трансляція'}</div>
                     <div class="vod-meta">🕒 ${vod.duration} | 📅 ${dateStr}</div>
                 </div>
             `;
 
             card.onclick = () => launchVideo(vod.m3u8, vod.title);
-            grid.appendChild(card); // Важливо:appendChild додає нові картки до старих, а не затирає їх
+            grid.appendChild(card);
         });
     }
 
     function launchVideo(m3u8Url, title) {
-        if (!m3u8Url) return alert('Немає посилання на потік.');
+        if (!m3u8Url) return alert('Посилання недійсне.');
 
-        nowPlayingText.innerText = "⏳ Завантаження потоку: " + title;
+        nowPlayingText.innerText = "⏳ Підключення до Twitch CDN: " + title;
 
+        // Пріоритет для iPhone/Safari (нативна підтримка HLS)
         if (player.canPlayType('application/vnd.apple.mpegurl')) {
+            if (hlsPlayer) {
+                hlsPlayer.destroy();
+                hlsPlayer = null;
+            }
             player.src = m3u8Url;
             player.play()
                 .then(() => { nowPlayingText.innerText = "Зараз відтворюється: " + title; })
                 .catch(err => {
-                    nowPlayingText.innerText = "Натисніть кнопку Play для відтворення";
-                    console.log("Автозапуск заблоковано політикою iOS браузера.");
+                    nowPlayingText.innerText = "Натисніть кнопку Play на плеєрі";
+                    console.log("Автозапуск стрима заблоковано політикою iOS.");
                 });
         } 
+        // Альтернатива для Android / PC через hls.js бібліотеку
         else if (Hls.isSupported()) {
             if (hlsPlayer) hlsPlayer.destroy();
             hlsPlayer = new Hls();
@@ -187,11 +188,11 @@
             });
             hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                 if(data.fatal) {
-                    nowPlayingText.innerText = "❌ Помилка завантаження відео (можливо файл видалено з серверов Twitch)";
+                    nowPlayingText.innerText = "❌ Помилка: Відеофайл остаточно видалено з CDN серверів Twitch.";
                 }
             });
         } else {
-            alert('Ваш пристрій не підтримує HLS відео.');
+            alert('Пристрій не підтримує HLS потоки.');
         }
     }
 </script>
