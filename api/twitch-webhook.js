@@ -3,6 +3,17 @@ import { Redis } from '@upstash/redis';
 
 const redis = Redis.fromEnv();
 
+function extractVodUrl(thumb) {
+    if (!thumb) return null;
+    const match1 = thumb.match(/cf_vods\/([^\/]+)\/([^\/]+)\/thumb/);
+    if (match1) return `https://${match1[1]}.cloudfront.net/${match1[2]}/chunked/index-dvr.m3u8`;
+    
+    const match2 = thumb.match(/([^\/]+)\/thumb\//);
+    if (match2) return `https://d2v02itv0y9u9t.cloudfront.net/${match2[1]}/chunked/index-dvr.m3u8`;
+    
+    return null;
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         res.setHeader('Allow', 'POST');
@@ -29,8 +40,7 @@ export default async function handler(req, res) {
             const tokenData = await tokenResponse.json();
             const accessToken = tokenData.access_token;
 
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
+            // Стрім щойно стартував. Twitch вже створює архів.
             const videosResponse = await fetch(`https://api.twitch.tv/helix/videos?user_id=${broadcasterId}&type=archive&first=1`, {
                 headers: { 'Client-ID': CLIENT_ID, 'Authorization': `Bearer ${accessToken}` }
             });
@@ -38,19 +48,7 @@ export default async function handler(req, res) {
 
             if (videosData.data && videosData.data.length > 0) {
                 const video = videosData.data[0];
-                const thumb = video.thumbnail_url;
-                let finalM3u8 = null;
-
-                if (thumb && thumb.includes('/thumb/')) {
-                    let basePath = thumb.split('/thumb/')[0];
-                    if (basePath.includes('vod-secure.twitch.tv')) {
-                        basePath = basePath.replace('vod-secure.twitch.tv', 'd2v02itv0y9u9t.cloudfront.net');
-                    }
-                    if (basePath.includes('cloudfront.net') && !basePath.includes('/cf_vods/')) {
-                        basePath = basePath.replace('.cloudfront.net/', '.cloudfront.net/cf_vods/');
-                    }
-                    finalM3u8 = `${basePath}/chunked/index-dvr.m3u8`;
-                }
+                const finalM3u8 = extractVodUrl(video.thumbnail_url);
 
                 if (finalM3u8) {
                     const dbKey = `intercepted_vods:${username}`;
@@ -60,7 +58,7 @@ export default async function handler(req, res) {
                         savedVods.unshift({
                             id: video.id,
                             title: video.title,
-                            duration: video.duration || "У ефірі...",
+                            duration: "У ефірі...",
                             created_at: video.created_at,
                             thumbnail: video.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180'),
                             m3u8: finalM3u8,
@@ -73,7 +71,7 @@ export default async function handler(req, res) {
                 }
             }
         } catch (err) {
-            console.error("Помилка всередині вебхука:", err);
+            console.error("Помилка вебхука:", err);
         }
 
         return res.status(200).end();

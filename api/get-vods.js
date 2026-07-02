@@ -3,6 +3,20 @@ import { Redis } from '@upstash/redis';
 
 const redis = Redis.fromEnv();
 
+// Розумний парсер лінків
+function extractVodUrl(thumb) {
+    if (!thumb) return null;
+    // Патерн 1 (Є підпапка cf_vods)
+    const match1 = thumb.match(/cf_vods\/([^\/]+)\/([^\/]+)\/thumb/);
+    if (match1) return `https://${match1[1]}.cloudfront.net/${match1[2]}/chunked/index-dvr.m3u8`;
+    
+    // Патерн 2 (Прямий лінк)
+    const match2 = thumb.match(/([^\/]+)\/thumb\//);
+    if (match2) return `https://d2v02itv0y9u9t.cloudfront.net/${match2[1]}/chunked/index-dvr.m3u8`;
+    
+    return null;
+}
+
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET');
@@ -14,9 +28,7 @@ export default async function handler(req, res) {
     const CLIENT_ID = process.env.TWITCH_CLIENT_ID;
     const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 
-    if (!CLIENT_ID || !CLIENT_SECRET) {
-        return res.status(200).json({ vods: [], nextCursor: null });
-    }
+    if (!CLIENT_ID || !CLIENT_SECRET) return res.status(200).json({ vods: [], nextCursor: null });
 
     try {
         const searchName = username.toLowerCase();
@@ -49,23 +61,7 @@ export default async function handler(req, res) {
 
             if (videosData.data) {
                 for (const video of videosData.data) {
-                    const thumb = video.thumbnail_url;
-                    let finalM3u8 = null;
-
-                    if (thumb && thumb.includes('/thumb/')) {
-                        let basePath = thumb.split('/thumb/')[0];
-                        
-                        if (basePath.includes('vod-secure.twitch.tv')) {
-                            basePath = basePath.replace('vod-secure.twitch.tv', 'd2v02itv0y9u9t.cloudfront.net');
-                        }
-                        
-                        if (basePath.includes('cloudfront.net') && !basePath.includes('/cf_vods/')) {
-                            basePath = basePath.replace('.cloudfront.net/', '.cloudfront.net/cf_vods/');
-                        }
-                        
-                        finalM3u8 = `${basePath}/chunked/index-dvr.m3u8`;
-                    }
-
+                    const finalM3u8 = extractVodUrl(video.thumbnail_url);
                     if (finalM3u8) {
                         twitchVods.push({
                             id: video.id,
@@ -84,7 +80,7 @@ export default async function handler(req, res) {
         
         interceptedVods.forEach(saved => {
             if (!combinedVods.some(v => v.id === saved.id)) {
-                saved.title = `[ВРЯТОВАНО] ${saved.title}`;
+                saved.title = `[МОНІТОРИНГ] ${saved.title}`;
                 combinedVods.push(saved);
             }
         });
