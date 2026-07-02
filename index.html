@@ -259,6 +259,16 @@
             });
         }
     }
+	var hlsInstance = new Hls({
+   	 // Ця функція змушує плеєр завантажувати всі файли через ваш проксі
+   	 xhrSetup: function(xhr, url) {
+       		 if (url.includes('vod-secure.twitch.tv')) {
+           	 // Перетворюємо пряме посилання на фрагмент у посилання на проксі
+           	 const proxiedUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
+            	xhr.open('GET', proxiedUrl, true);
+        	}
+    	}
+	});
 </script>
 
 </body>

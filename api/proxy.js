@@ -1,44 +1,31 @@
-function launchVideo(proxiedM3u8Url, base64Title) {
-        const decodedTitle = decodeURIComponent(escape(atob(base64Title)));
-        const playerSection = document.getElementById('playerSection');
-        const video = document.getElementById('videoPlayer');
-        document.getElementById('currentPlayerTitle').innerText = decodedTitle;
+// api/proxy.js
+export default async function handler(req, res) {
+    const { url, vodId } = req.query;
+    const targetUrl = vodId 
+        ? `https://vod-secure.twitch.tv/${vodId}/chunked/index-dvr.m3u8`
+        : url;
 
-        playerSection.style.display = 'block';
-        playerSection.scrollIntoView({ behavior: 'smooth' });
+    if (!targetUrl) return res.status(400).send('URL required');
 
-        // Якщо HLS вже був запущений — знищуємо його перед новим стартом
-        if (hlsInstance) {
-            hlsInstance.destroy();
-        }
+    try {
+        const response = await fetch(targetUrl, {
+            headers: { 
+                'Origin': 'https://www.twitch.tv', 
+                'Referer': 'https://www.twitch.tv/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
 
-        // Hls.js тепер працює з потоком, який віддає наш proxy.js
-        if (Hls.isSupported()) {
-            hlsInstance = new Hls({
-                // Додаємо конфігурацію для того, щоб HLS проксіював запити фрагментів
-                xhrSetup: function(xhr, url) {
-                    // Якщо шлях відносний, додаємо наш API префікс
-                    if (url.startsWith('/')) return;
-                }
-            });
-            
-            hlsInstance.loadSource(proxiedM3u8Url);
-            hlsInstance.attachMedia(video);
-            hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                video.play().catch(e => console.log("Автоплей заблоковано браузером"));
-            });
+        if (!response.ok) return res.status(502).send('Bad Gateway');
 
-            hlsInstance.on(Hls.Events.ERROR, function (event, data) {
-                if (data.fatal) {
-                    console.error("Критична помилка HLS:", data);
-                    alert("Помилка відтворення. Можливо, потік потребує авторизації або файл видалено.");
-                }
-            });
-        } 
-        else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = proxiedM3u8Url;
-            video.addEventListener('loadedmetadata', function() {
-                video.play();
-            });
-        }
+        // Пересилаємо заголовки Twitch назад клієнту
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Content-Type', response.headers.get('Content-Type') || 'application/vnd.apple.mpegurl');
+        
+        // Використовуємо передачу потоку замість буфера
+        const body = await response.body;
+        body.pipe(res);
+    } catch (err) {
+        res.status(500).send(err.message);
     }
+}
