@@ -1,4 +1,7 @@
 // api/get-vods.js
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -12,73 +15,72 @@ export default async function handler(req, res) {
     const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
 
     if (!CLIENT_ID || !CLIENT_SECRET) {
-        return res.status(200).json({
-            vods: [{
-                id: "mock",
-                title: "Демо-потік (Перевірте змінні оточення)",
-                duration: "1h 00m",
-                created_at: new Date().toISOString(),
-                thumbnail: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=320&h=180&fit=crop",
-                m3u8: `/api/proxy?url=${encodeURIComponent("https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8")}`
-            }],
-            nextCursor: null
-        });
+        return res.status(200).json({ vods: [], nextCursor: null });
     }
 
     try {
-        // Отримання токену доступу Twitch API
+        const searchName = username.toLowerCase();
+
+        const dbKey = `intercepted_vods:${searchName}`;
+        const interceptedVods = await redis.get(dbKey) || [];
+
         const tokenResponse = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}&grant_type=client_credentials`, { method: 'POST' });
         const tokenData = await tokenResponse.json();
         const accessToken = tokenData.access_token;
 
-        // Отримання ID користувача за нікнеймом
-        const userResponse = await fetch(`https://api.twitch.tv/helix/users?login=${username}`, {
+        const userResponse = await fetch(`https://api.twitch.tv/helix/users?login=${searchName}`, {
             headers: { 'Client-ID': CLIENT_ID, 'Authorization': `Bearer ${accessToken}` }
         });
         const userData = await userResponse.json();
-        if (!userData.data || userData.data.length === 0) return res.status(404).json({ error: 'Стрімера не знайдено.' });
-        const userId = userData.data[0].id;
-
-        // Запит списку відео
-        let twitchApiUrl = `https://api.twitch.tv/helix/videos?user_id=${userId}&type=all&first=10`;
-        if (cursor) twitchApiUrl += `&after=${cursor}`;
-
-        const videosResponse = await fetch(twitchApiUrl, {
-            headers: { 'Client-ID': CLIENT_ID, 'Authorization': `Bearer ${accessToken}` }
-        });
-        const videosData = await videosResponse.json();
-
-        const processedVods = [];
         
-        if (videosData.data) {
-            for (const video of videosData.data) {
-                const thumb = video.thumbnail_url;
-                let finalM3u8 = "";
+        let twitchVods = [];
+        let nextCursor = null;
 
-                // Витягуємо унікальний системний хеш з URL картинки
-                if (thumb && thumb.includes('cf_vods/')) {
-                    const segment = thumb.split('cf_vods/')[1].split('/thumb/')[0];
-                    // Склеюємо з ПРАВИЛЬНИМ відео-сервером Twitch
-                    const rawUsherUrl = `https://vod-secure.twitch.tv/cf_vods/${segment}/chunked/index-dvr.m3u8`;
-                    finalM3u8 = `/api/proxy?url=${encodeURIComponent(rawUsherUrl)}`;
-                } else {
-                    continue; 
+        if (userData.data && userData.data.length > 0) {
+            const userId = userData.data[0].id;
+            let twitchApiUrl = `https://api.twitch.tv/helix/videos?user_id=${userId}&type=all&first=10`;
+            if (cursor) twitchApiUrl += `&after=${cursor}`;
+
+            const videosResponse = await fetch(twitchApiUrl, {
+                headers: { 'Client-ID': CLIENT_ID, 'Authorization': `Bearer ${accessToken}` }
+            });
+            const videosData = await videosResponse.json();
+            
+            if (videosData.pagination) nextCursor = videosData.pagination.cursor;
+
+            if (videosData.data) {
+                for (const video of videosData.data) {
+                    const thumb = video.thumbnail_url;
+                    if (thumb && thumb.includes('cf_vods/')) {
+                        const segment = thumb.split('cf_vods/')[1].split('/thumb/')[0];
+                        const finalM3u8 = `https://d3fi1amfgojobc.cloudfront.net/cf_vods/${segment}/chunked/index-dvr.m3u8`;
+                        twitchVods.push({
+                            id: video.id,
+                            title: video.title,
+                            duration: video.duration,
+                            created_at: video.created_at,
+                            thumbnail: video.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180'),
+                            m3u8: finalM3u8
+                        });
+                    }
                 }
-
-                processedVods.push({
-                    id: video.id,
-                    title: video.title,
-                    duration: video.duration,
-                    created_at: video.created_at,
-                    thumbnail: video.thumbnail_url.replace('%{width}', '320').replace('%{height}', '180'),
-                    m3u8: finalM3u8
-                });
             }
         }
 
+        const combinedVods = [...twitchVods];
+        
+        interceptedVods.forEach(saved => {
+            if (!combinedVods.some(v => v.id === saved.id)) {
+                saved.title = `[ВРЯТОВАНО] ${saved.title}`;
+                combinedVods.push(saved);
+            }
+        });
+
+        combinedVods.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
         return res.status(200).json({
-            vods: processedVods,
-            nextCursor: videosData.pagination ? videosData.pagination.cursor : null
+            vods: combinedVods,
+            nextCursor: nextCursor
         });
 
     } catch (error) {

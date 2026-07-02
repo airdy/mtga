@@ -11,6 +11,7 @@
             --card-bg: #1f1f23;
             --accent-color: #9146ff;
             --accent-hover: #772ce8;
+            --success-color: #00f59b;
             --text-main: #efeff1;
             --text-muted: #adadb8;
             --border-color: #303032;
@@ -190,6 +191,12 @@
             color: var(--text-muted);
             font-size: 1.1rem;
         }
+
+        .monitored-list {
+            margin-top: 12px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
     </style>
 </head>
 <body>
@@ -202,17 +209,26 @@
     <div class="panel">
         <div class="panel-title">Пряме відновлення</div>
         <div class="input-group">
-            <input type="text" id="directUrlInput" placeholder="Вставте пряме посилання .m3u8 або системний хеш папки (напр., 5c6c79e9..._1782936187)">
+            <input type="text" id="directUrlInput" placeholder="Вставте пряме посилання .m3u8 або системний хеш папки (напр., 3a8276f1..._1234567890)">
             <button onclick="handleDirectRecovery()">Відновити</button>
         </div>
     </div>
 
     <div class="panel">
-        <div class="panel-title">Пошук відкритих ВОДів</div>
+        <div class="panel-title">Пошук відкритих та перехоплених ВОДів</div>
         <div class="input-group">
             <input type="text" id="usernameInput" placeholder="Введіть нікнейм стрімера..." onkeydown="if(event.key === 'Enter') searchVods()">
             <button onclick="searchVods()">Знайти</button>
         </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">Фоновий моніторинг (Вебхуки Upstash)</div>
+        <div class="input-group">
+            <input type="text" id="monitorInput" placeholder="Нікнейм стрімера для взяття на контроль..." onkeydown="if(event.key === 'Enter') subscribeToMonitor()">
+            <button style="background: #23a55a;" onclick="subscribeToMonitor()">Увімкнути моніторинг</button>
+        </div>
+        <div class="monitored-list" id="monitoredListText">Завантаження списку активних підписок...</div>
     </div>
 
     <div class="player-section" id="playerSection">
@@ -220,12 +236,55 @@
         <video id="videoPlayer" controls></video>
     </div>
 
-    <div id="statusMessage" class="status-message">Введіть нікнейм або скористайтеся панеллю прямого відновлення.</div>
+    <div id="statusMessage" class="status-message">Введіть нікнейм або скористайтеся інструментами вище.</div>
     <div class="vods-grid" id="vodsGrid"></div>
 </div>
 
 <script>
     let hlsInstance = null;
+
+    document.addEventListener("DOMContentLoaded", updateMonitoredListDisplay);
+
+    async function updateMonitoredListDisplay() {
+        try {
+            const res = await fetch('/api/subscribe');
+            const data = await res.json();
+            if (data.channels && data.channels.length > 0) {
+                document.getElementById('monitoredListText').innerText = `Зараз під моніторингом: ${data.channels.join(', ')}`;
+            } else {
+                document.getElementById('monitoredListText').innerText = "Наразі немає активних фонових підписок.";
+            }
+        } catch(e) {
+            document.getElementById('monitoredListText').innerText = "Не вдалося завантажити список підписок.";
+        }
+    }
+
+    async function subscribeToMonitor() {
+        const username = document.getElementById('monitorInput').value.trim();
+        if (!username) return alert('Введіть нікнейм для підписки!');
+
+        document.getElementById('monitoredListText').innerText = "Надсилаємо запит підписки в Twitch...";
+
+        try {
+            const response = await fetch('/api/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                alert(data.message);
+                document.getElementById('monitorInput').value = '';
+            } else {
+                alert(`Помилка: ${data.error}`);
+            }
+            updateMonitoredListDisplay();
+        } catch (err) {
+            alert(`Помилка з'єднання: ${err.message}`);
+            updateMonitoredListDisplay();
+        }
+    }
 
     async function searchVods() {
         const username = document.getElementById('usernameInput').value.trim();
@@ -236,7 +295,7 @@
 
         grid.innerHTML = '';
         status.style.display = 'block';
-        status.innerText = 'Шукаємо відкриті відео...';
+        status.innerText = 'Аналізуємо відкриті сервери та хмарну базу даних...';
 
         try {
             const response = await fetch(`/api/get-vods?username=${encodeURIComponent(username)}`);
@@ -248,7 +307,7 @@
             }
 
             if (!data.vods || data.vods.length === 0) {
-                status.innerText = 'В офіційному профілі немає відкритих відео. Скористайтеся верхньою панеллю "Прямого відновлення".';
+                status.innerText = 'Жодних відео не знайдено ні в профілі, ні в базі перехоплень.';
                 return;
             }
 
@@ -258,9 +317,8 @@
                 const card = document.createElement('div');
                 card.className = 'vod-card';
                 
-                // Безпечне кодування тексту, щоб уникнути збоїв через лапки
                 const safeTitle = btoa(unescape(encodeURIComponent(vod.title)));
-                card.setAttribute('onclick', `launchVideoFromGrid('${vod.m3u8}', '${safeTitle}')`);
+                card.setAttribute('onclick', `launchVideo('${vod.m3u8}', '${safeTitle}')`);
 
                 const date = new Date(vod.created_at).toLocaleDateString('uk-UA', {
                     day: 'numeric', month: 'long', year: 'numeric'
@@ -291,30 +349,25 @@
         let finalUrl = "";
 
         if (rawInput.startsWith('http') && rawInput.includes('.m3u8')) {
-            finalUrl = `/api/proxy?url=${encodeURIComponent(rawInput)}`;
+            finalUrl = rawInput;
         } 
         else if (rawInput.includes('_') && !rawInput.startsWith('http')) {
-            const guessedCdn = `https://d3fi1amfgojobc.cloudfront.net/${rawInput}/chunked/index-dvr.m3u8`;
-            finalUrl = `/api/proxy?url=${encodeURIComponent(guessedCdn)}`;
+            finalUrl = `https://d3fi1amfgojobc.cloudfront.net/cf_vods/${rawInput}/chunked/index-dvr.m3u8`;
         } 
         else {
-            alert('Невідомий формат! Вставте або пряме посилання .m3u8, або повну назву папки з архівом (з нижніми підкресленнями).');
+            alert('Вставте або пряме посилання .m3u8, або повну назву папки з архівом.');
             return;
         }
 
-        launchVideo(finalUrl, "Пряме відновлення трансляції");
+        const safeTitle = btoa(unescape(encodeURIComponent("Пряме відновлення трансляції")));
+        launchVideo(finalUrl, safeTitle);
     }
 
-    // Допоміжна функція для розкодування назви з сітки результатів
-    function launchVideoFromGrid(proxyUrl, base64Title) {
+    function launchVideo(directM3u8Url, base64Title) {
         const decodedTitle = decodeURIComponent(escape(atob(base64Title)));
-        launchVideo(proxyUrl, decodedTitle);
-    }
-
-    function launchVideo(proxyUrl, title) {
         const playerSection = document.getElementById('playerSection');
         const video = document.getElementById('videoPlayer');
-        document.getElementById('currentPlayerTitle').innerText = title;
+        document.getElementById('currentPlayerTitle').innerText = decodedTitle;
 
         playerSection.style.display = 'block';
         playerSection.scrollIntoView({ behavior: 'smooth' });
@@ -325,23 +378,23 @@
 
         if (Hls.isSupported()) {
             hlsInstance = new Hls({ maxMaxBufferLength: 30 });
-            hlsInstance.loadSource(proxyUrl);
+            hlsInstance.loadSource(directM3u8Url);
             hlsInstance.attachMedia(video);
             hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                video.play().catch(err => console.log("Автоплей очікує на клік користувача"));
+                video.play().catch(err => console.log("Очікування взаємодії"));
             });
 
             hlsInstance.on(Hls.Events.ERROR, function (event, data) {
                 if (data.fatal) {
                     console.error("Помилка HLS:", data);
                     if (data.details === 'manifestLoadError') {
-                        alert("Не вдалося завантажити відео-маніфест. Швидше за все, Twitch вже фізично видалив цей запис зі своїх серверів.");
+                        alert("Не вдалося завантажити маніфест. Швидше за все, Twitch уже видалив фізичні файли цього стріму зі своїх CDN-серверів.");
                     }
                 }
             });
         } 
         else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = proxyUrl;
+            video.src = directM3u8Url;
             video.addEventListener('loadedmetadata', function() {
                 video.play();
             });
