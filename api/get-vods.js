@@ -52,14 +52,18 @@ export default async function handler(req, res) {
                     const thumb = video.thumbnail_url;
                     let finalM3u8 = null;
 
-                    if (thumb && thumb.includes('cf_vods/')) {
-                        const parts = thumb.split('cf_vods/')[1].split('/thumb/')[0].split('/');
-                        if (parts.length >= 2) {
-                            finalM3u8 = `https://${parts[0]}.cloudfront.net/${parts.slice(1).join('/')}/chunked/index-dvr.m3u8`;
+                    if (thumb && thumb.includes('/thumb/')) {
+                        let basePath = thumb.split('/thumb/')[0];
+                        
+                        if (basePath.includes('vod-secure.twitch.tv')) {
+                            basePath = basePath.replace('vod-secure.twitch.tv', 'd2v02itv0y9u9t.cloudfront.net');
                         }
-                    } else if (thumb && thumb.includes('vod-secure.twitch.tv/')) {
-                        const streamId = thumb.split('vod-secure.twitch.tv/')[1].split('/thumb/')[0];
-                        finalM3u8 = `https://d2v02itv0y9u9t.cloudfront.net/${streamId}/chunked/index-dvr.m3u8`;
+                        
+                        if (basePath.includes('cloudfront.net') && !basePath.includes('/cf_vods/')) {
+                            basePath = basePath.replace('.cloudfront.net/', '.cloudfront.net/cf_vods/');
+                        }
+                        
+                        finalM3u8 = `${basePath}/chunked/index-dvr.m3u8`;
                     }
 
                     if (finalM3u8) {

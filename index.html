@@ -342,24 +342,66 @@
         }
     }
 
-    function handleDirectRecovery() {
+    function launchVideo(directM3u8Url, base64Title) {
+    const decodedTitle = decodeURIComponent(escape(atob(base64Title)));
+    const playerSection = document.getElementById('playerSection');
+    const video = document.getElementById('videoPlayer');
+    document.getElementById('currentPlayerTitle').innerText = decodedTitle;
+
+    playerSection.style.display = 'block';
+    playerSection.scrollIntoView({ behavior: 'smooth' });
+
+    // Стукаємо прямо в твій ОРИГІНАЛЬНИЙ proxy.js
+    const proxiedUrl = `/api/proxy?url=${encodeURIComponent(directM3u8Url)}`;
+
+    if (hlsInstance) {
+        hlsInstance.destroy();
+    }
+
+    if (Hls.isSupported()) {
+        hlsInstance = new Hls({ maxMaxBufferLength: 30 });
+        hlsInstance.loadSource(proxiedUrl);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
+            video.play().catch(err => console.log("Очікування кліку користувача"));
+        });
+
+        hlsInstance.on(Hls.Events.ERROR, function (event, data) {
+            if (data.fatal) {
+                console.error("Помилка HLS:", data);
+                if (data.details === 'manifestLoadError') {
+                    alert("Не вдалося запустити трансляцію. Можливо, Twitch остаточно зачистив фізичні файли цього запису зі своїх серверів.");
+                }
+            }
+        });
+    } 
+    else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = proxiedUrl;
+        video.addEventListener('loadedmetadata', function() {
+            video.play();
+        });
+    }
+}
+
+function handleDirectRecovery() {
     let rawInput = document.getElementById('directUrlInput').value.trim();
     if (!rawInput) return alert('Введіть посилання або системний хеш!');
 
     let finalUrl = "";
 
-    // Якщо вставили повне посилання .m3u8
     if (rawInput.startsWith('http') && rawInput.includes('.m3u8')) {
-        // Якщо це суворий домен vod-secure, підміняємо його на дзеркало без CORS
         if (rawInput.includes('vod-secure.twitch.tv')) {
             finalUrl = rawInput.replace('vod-secure.twitch.tv', 'd2v02itv0y9u9t.cloudfront.net');
+            if (!finalUrl.includes('/cf_vods/')) {
+                finalUrl = finalUrl.replace('d2v02itv0y9u9t.cloudfront.net/', 'd2v02itv0y9u9t.cloudfront.net/cf_vods/');
+            }
         } else {
             finalUrl = rawInput;
         }
     } 
-    // Якщо вставили просто хеш папки (напр. 3a8276f1..._1234567890)
     else if (rawInput.includes('_')) {
-        finalUrl = `https://d2v02itv0y9u9t.cloudfront.net/${rawInput}/chunked/index-dvr.m3u8`;
+        // Якщо ввели просто хеш папки, збираємо правильний CDN шлях
+        finalUrl = `https://d2v02itv0y9u9t.cloudfront.net/cf_vods/${rawInput}/chunked/index-dvr.m3u8`;
     } 
     else {
         alert('Вставте або пряме посилання .m3u8, або назву папки з архівом (наприклад: 4a5b6c..._1720000000).');
@@ -368,45 +410,7 @@
 
     const safeTitle = btoa(unescape(encodeURIComponent("Пряме відновлення трансляції")));
     launchVideo(finalUrl, safeTitle);
-	}
-
-    function launchVideo(directM3u8Url, base64Title) {
-        const decodedTitle = decodeURIComponent(escape(atob(base64Title)));
-        const playerSection = document.getElementById('playerSection');
-        const video = document.getElementById('videoPlayer');
-        document.getElementById('currentPlayerTitle').innerText = decodedTitle;
-
-        playerSection.style.display = 'block';
-        playerSection.scrollIntoView({ behavior: 'smooth' });
-
-        if (hlsInstance) {
-            hlsInstance.destroy();
-        }
-
-        if (Hls.isSupported()) {
-            hlsInstance = new Hls({ maxMaxBufferLength: 30 });
-            hlsInstance.loadSource(directM3u8Url);
-            hlsInstance.attachMedia(video);
-            hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                video.play().catch(err => console.log("Очікування взаємодії"));
-            });
-
-            hlsInstance.on(Hls.Events.ERROR, function (event, data) {
-                if (data.fatal) {
-                    console.error("Помилка HLS:", data);
-                    if (data.details === 'manifestLoadError') {
-                        alert("Не вдалося завантажити маніфест. Швидше за все, Twitch уже видалив фізичні файли цього стріму зі своїх CDN-серверів.");
-                    }
-                }
-            });
-        } 
-        else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = directM3u8Url;
-            video.addEventListener('loadedmetadata', function() {
-                video.play();
-            });
-        }
-    }
+}
 </script>
 
 </body>
